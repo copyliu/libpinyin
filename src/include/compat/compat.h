@@ -36,16 +36,3 @@ inline int open(const gchar* filename, int flags, int mode) {
 #define freopen g_freopen
 #define fsync g_fsync
 #define utime g_utime
-
-// Patch main to set UTF-8 console encoding
-#ifdef _WIN32
-extern "C" int __stdcall SetConsoleCP(unsigned int wCodePageID);
-extern "C" int __stdcall SetConsoleOutputCP(unsigned int wCodePageID);
-#define main                                    \
-	_main_compat_init = [] {                    \
-		constexpr unsigned int CP_UTF8 = 65001; \
-		SetConsoleCP(CP_UTF8);                  \
-		return SetConsoleOutputCP(CP_UTF8);     \
-	}();                                        \
-	int main
-#endif
