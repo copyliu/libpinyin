@@ -156,6 +156,10 @@ install(
 
 ######## Definition
 
+add_definitions(
+    -include "compat/compat.h"
+)
+
 if (CMAKE_BUILD_TYPE MATCHES Debug)
     add_definitions(
         -O0
