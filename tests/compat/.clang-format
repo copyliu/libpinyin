@@ -1,0 +1,12 @@
+---
+Language: Cpp
+UseTab: ForIndentation
+IndentWidth: 4
+TabWidth: 4
+PointerAlignment: Left
+SpaceAfterCStyleCast: true
+AlignEscapedNewlines: Left
+AccessModifierOffset: -4
+AlwaysBreakTemplateDeclarations: Yes
+SpaceAfterTemplateKeyword: false
+...
