@@ -733,7 +733,7 @@ bool zhuyin_set_chewing_scheme(zhuyin_context_t * context,
         context->m_chewing_parser = new ZhuyinDaChenCP26Parser2();
         break;
     default:
-        assert(FALSE);
+        abort();
     }
     return true;
 }
@@ -989,7 +989,7 @@ bool zhuyin_get_sentence(zhuyin_instance_t * instance,
         return false;
 
     MatchResult result = NULL;
-    assert(results.get_result(0, result));
+    check_result(results.get_result(0, result));
 
     bool retval = pinyin::convert_to_utf8
         (context->m_phrase_index, result,
@@ -1183,7 +1183,7 @@ static phrase_token_t _get_previous_token(zhuyin_instance_t * instance,
 
         /* use the first candidate. */
         MatchResult result = NULL;
-        assert(results.get_result(0, result));
+        check_result(results.get_result(0, result));
 
         phrase_token_t cur_token = g_array_index
             (result, phrase_token_t, offset);
@@ -1300,7 +1300,7 @@ static bool _compute_phrase_length(zhuyin_context_t * context,
 
         switch(candidate->m_candidate_type) {
         case BEST_MATCH_CANDIDATE:
-            assert(FALSE);
+            abort();
         case NORMAL_CANDIDATE_AFTER_CURSOR:
         case NORMAL_CANDIDATE_BEFORE_CURSOR: {
             phrase_index->get_phrase_item(candidate->m_token, item);
@@ -1308,7 +1308,7 @@ static bool _compute_phrase_length(zhuyin_context_t * context,
             break;
         }
         case ZOMBIE_CANDIDATE:
-            assert(FALSE);
+            abort();
         }
     }
 
@@ -1338,7 +1338,7 @@ static bool _compute_phrase_strings_of_items(zhuyin_instance_t * instance,
                  &(candidate->m_phrase_string));
             break;
         case ZOMBIE_CANDIDATE:
-            assert(FALSE);
+            abort();
         }
     }
 
@@ -1707,7 +1707,7 @@ bool zhuyin_train(zhuyin_instance_t * instance){
     context->m_modified = true;
 
     MatchResult result = NULL;
-    assert(results.get_result(0, result));
+    check_result(results.get_result(0, result));
 
     bool retval = context->m_pinyin_lookup->train_result3
         (&matrix, instance->m_constraints, result);

@@ -28,10 +28,47 @@ using namespace kyotocabinet;
 
 namespace pinyin{
 
+/* keep the following function synced between dbm implementations
+   for consistent phrase key compare. */
+inline int compare_phrase(ucs4_t * lhs, ucs4_t * rhs, int phrase_length) {
+    int result;
+    for (int i = 0; i < phrase_length; ++i) {
+        result = lhs[i] - rhs[i];
+        if (0 != result)
+            return result;
+    }
+
+    return 0;
+}
+
+/* keep dbm key compare function inside the corresponding dbm file
+   to get more flexibility. */
+
+bool kyotodb_phrase_continue_search(const char* akbuf, size_t aksiz,
+                                    const char* bkbuf, size_t bksiz) {
+    ucs4_t * lhs_phrase = (ucs4_t *) akbuf;
+    int lhs_phrase_length = aksiz / sizeof(ucs4_t);
+    ucs4_t * rhs_phrase = (ucs4_t *) bkbuf;
+    int rhs_phrase_length = bksiz / sizeof(ucs4_t);
+
+    /* The key in dbm is longer than the key in application. */
+    if (lhs_phrase_length >= rhs_phrase_length)
+        return false;
+
+    int min_phrase_length = lhs_phrase_length;
+
+    int result = compare_phrase (lhs_phrase, rhs_phrase, min_phrase_length);
+    if (0 != result)
+        return false;
+
+    /* continue the longer phrase search. */
+    return true;
+}
+
 PhraseLargeTable3::PhraseLargeTable3() {
     /* create in-memory db. */
-    m_db = new GrassDB;
-    assert(m_db->open("-", BasicDB::OREADER|BasicDB::OWRITER|BasicDB::OCREATE));
+    m_db = new ProtoTreeDB;
+    check_result(m_db->open("-", BasicDB::OREADER|BasicDB::OWRITER|BasicDB::OCREATE));
 
     m_entry = new PhraseTableEntry;
 }
@@ -75,7 +112,7 @@ bool PhraseLargeTable3::load_db(const char * filename) {
     m_entry = new PhraseTableEntry;
 
     /* create in-memory db. */
-    m_db = new GrassDB;
+    m_db = new ProtoTreeDB;
 
     if (!m_db->open("-", BasicDB::OREADER|BasicDB::OWRITER|BasicDB::OCREATE))
         return false;
@@ -147,11 +184,65 @@ int PhraseLargeTable3::search(int phrase_length,
     m_entry->m_chunk.set_size(vsiz);
     /* m_chunk may re-allocate here. */
     char * vbuf = (char *) m_entry->m_chunk.begin();
-    assert (vsiz == m_db->get(kbuf, phrase_length * sizeof(ucs4_t),
-                              vbuf, vsiz));
+    check_result(vsiz == m_db->get(kbuf, phrase_length * sizeof(ucs4_t),
+                                   vbuf, vsiz));
 
     result = m_entry->search(tokens) | result;
 
+    return result;
+}
+
+int PhraseLargeTable3::search_suggestion(int phrase_length,
+                                         /* in */ const ucs4_t phrase[],
+                                         /* out */ PhraseTokens tokens) const {
+    int result = SEARCH_NONE;
+
+    if (NULL == m_db)
+        return result;
+    assert(NULL != m_entry);
+
+    const char * akbuf = (char *) phrase;
+    const size_t aksiz = phrase_length * sizeof(ucs4_t);
+    const int32_t vsiz = m_db->check(akbuf, aksiz);
+    /* -1 on failure. */
+    if (-1 == vsiz)
+        return result;
+
+    BasicDB::Cursor * cursor = m_db->cursor();
+    bool retval = cursor->jump(akbuf, aksiz);
+    if (!retval) {
+        delete cursor;
+        return result;
+    }
+
+    /* Get the next entry */
+    retval = cursor->step();
+    if (!retval) {
+        delete cursor;
+        return result;
+    }
+
+    size_t bksiz = 0;
+    const char * bkbuf = cursor->get_key(&bksiz);
+    while(kyotodb_phrase_continue_search(akbuf, aksiz, bkbuf, bksiz)) {
+        size_t bvsiz = 0;
+        char * bvbuf = cursor->get_value(&bvsiz);
+        m_entry->m_chunk.set_chunk(bvbuf, bvsiz, NULL);
+        result = m_entry->search(tokens) | result;
+        m_entry->m_chunk.set_size(0);
+        delete [] bvbuf;
+
+        retval = cursor->step();
+        if (!retval) {
+            delete cursor;
+            return result;
+        }
+
+        bksiz = 0;
+        bkbuf = cursor->get_key(&bksiz);
+    }
+
+    delete cursor;
     return result;
 }
 
@@ -202,7 +293,7 @@ int PhraseLargeTable3::add_index(int phrase_length,
     m_entry->m_chunk.set_size(vsiz);
     /* m_chunk may re-allocate here. */
     vbuf = (char *) m_entry->m_chunk.begin();
-    assert(vsiz == m_db->get(kbuf, ksiz, vbuf, vsiz));
+    check_result(vsiz == m_db->get(kbuf, ksiz, vbuf, vsiz));
 
     int result = m_entry->add_index(token);
 
@@ -233,7 +324,7 @@ int PhraseLargeTable3::remove_index(int phrase_length,
     m_entry->m_chunk.set_size(vsiz);
     /* m_chunk may re-allocate here. */
     vbuf = (char *) m_entry->m_chunk.begin();
-    assert(vsiz == m_db->get(kbuf, ksiz, vbuf, vsiz));
+    check_result(vsiz == m_db->get(kbuf, ksiz, vbuf, vsiz));
 
     int result = m_entry->remove_index(token);
     if (ERROR_OK != result)

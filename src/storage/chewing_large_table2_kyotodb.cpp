@@ -21,16 +21,42 @@
 #include "chewing_large_table2.h"
 #include <kchashdb.h>
 #include <kccachedb.h>
+#include "pinyin_utils.h"
 #include "kyotodb_utils.h"
 
 using namespace kyotocabinet;
 
 namespace pinyin{
 
+/* keep dbm key compare function inside the corresponding dbm file
+   to get more flexibility. */
+
+bool kyotodb_chewing_continue_search(const char* akbuf, size_t aksiz,
+                                     const char* bkbuf, size_t bksiz) {
+    ChewingKey * lhs_chewing = (ChewingKey *) akbuf;
+    int lhs_chewing_length = aksiz / sizeof(ChewingKey);
+    ChewingKey * rhs_chewing = (ChewingKey *) bkbuf;
+    int rhs_chewing_length = bksiz / sizeof(ChewingKey);
+
+    /* The key in dbm is longer than the key in application. */
+    if (lhs_chewing_length >= rhs_chewing_length)
+        return false;
+
+    int min_chewing_length = lhs_chewing_length;
+
+    int result = pinyin_exact_compare2
+        (lhs_chewing, rhs_chewing, min_chewing_length);
+    if (0 != result)
+        return false;
+
+    /* continue the longer chewing search. */
+    return true;
+}
+
 ChewingLargeTable2::ChewingLargeTable2() {
     /* create in-memory db. */
-    m_db = new GrassDB;
-    assert(m_db->open("-", BasicDB::OREADER|BasicDB::OWRITER|BasicDB::OCREATE));
+    m_db = new ProtoTreeDB;
+    check_result(m_db->open("-", BasicDB::OREADER|BasicDB::OWRITER|BasicDB::OCREATE));
 
     m_entries = NULL;
     init_entries();
@@ -71,7 +97,7 @@ bool ChewingLargeTable2::load_db(const char * filename) {
     init_entries();
 
     /* create in-memory db. */
-    m_db = new GrassDB;
+    m_db = new ProtoTreeDB;
 
     if (!m_db->open("-", BasicDB::OREADER|BasicDB::OWRITER|BasicDB::OCREATE))
         return false;
@@ -144,8 +170,8 @@ int ChewingLargeTable2::search_internal(/* in */ const ChewingKey index[],
     entry->m_chunk.set_size(vsiz);
     /* m_chunk may re-allocate here. */
     char * vbuf = (char *) entry->m_chunk.begin();
-    assert(vsiz == m_db->get(kbuf, phrase_length * sizeof(ChewingKey),
-                             vbuf, vsiz));
+    check_result(vsiz == m_db->get(kbuf, phrase_length * sizeof(ChewingKey),
+                                   vbuf, vsiz));
 
     result = entry->search(keys, ranges) | result;
 
@@ -179,7 +205,68 @@ int ChewingLargeTable2::search_internal(int phrase_length,
         CASE(15);
         CASE(16);
     default:
-        assert(false);
+        abort();
+    }
+
+#undef CASE
+
+    return SEARCH_NONE;
+}
+
+template<int phrase_length>
+int ChewingLargeTable2::search_suggestion_internal
+(/* in */ const MemoryChunk & chunk,
+ int prefix_len,
+ /* in */ const ChewingKey prefix_keys[],
+ /* out */ PhraseTokens tokens) const {
+    int result = SEARCH_NONE;
+
+    ChewingTableEntry<phrase_length> * entry =
+        (ChewingTableEntry<phrase_length> *)
+        g_ptr_array_index(m_entries, phrase_length);
+    assert(NULL != entry);
+
+    entry->m_chunk.set_chunk(chunk.begin(), chunk.size(), NULL);
+
+    result = entry->search_suggestion(prefix_len, prefix_keys, tokens) | result;
+
+    entry->m_chunk.set_size(0);
+
+    return result;
+}
+
+int ChewingLargeTable2::search_suggestion_internal
+(int phrase_length,
+ /* in */ const MemoryChunk & chunk,
+ int prefix_len,
+ /* in */ const ChewingKey prefix_keys[],
+ /* out */ PhraseTokens tokens) const {
+
+#define CASE(len) case len:                             \
+    {                                                   \
+        return search_suggestion_internal<len>          \
+            (chunk, prefix_len, prefix_keys, tokens);   \
+    }
+
+    switch(phrase_length) {
+        CASE(1);
+        CASE(2);
+        CASE(3);
+        CASE(4);
+        CASE(5);
+        CASE(6);
+        CASE(7);
+        CASE(8);
+        CASE(9);
+        CASE(10);
+        CASE(11);
+        CASE(12);
+        CASE(13);
+        CASE(14);
+        CASE(15);
+        CASE(16);
+    default:
+        abort();
     }
 
 #undef CASE
@@ -236,7 +323,7 @@ int ChewingLargeTable2::add_index_internal(/* in */ const ChewingKey index[],
     entry->m_chunk.set_size(vsiz);
     /* m_chunk may re-allocate here. */
     vbuf = (char *) entry->m_chunk.begin();
-    assert(vsiz == m_db->get(kbuf, ksiz, vbuf, vsiz));
+    check_result(vsiz == m_db->get(kbuf, ksiz, vbuf, vsiz));
 
     int result = entry->add_index(keys, token);
 
@@ -277,7 +364,7 @@ int ChewingLargeTable2::add_index_internal(int phrase_length,
         CASE(15);
         CASE(16);
     default:
-        assert(false);
+        abort();
     }
 
 #undef CASE
@@ -305,7 +392,7 @@ int ChewingLargeTable2::remove_index_internal(/* in */ const ChewingKey index[],
     entry->m_chunk.set_size(vsiz);
     /* m_chunk may re-allocate here. */
     vbuf = (char *) entry->m_chunk.begin();
-    assert(vsiz == m_db->get(kbuf, ksiz, vbuf, vsiz));
+    check_result(vsiz == m_db->get(kbuf, ksiz, vbuf, vsiz));
 
     int result = entry->remove_index(keys, token);
     if (ERROR_OK != result)
@@ -348,7 +435,7 @@ int ChewingLargeTable2::remove_index_internal(int phrase_length,
         CASE(15);
         CASE(16);
     default:
-        assert(false);
+        abort();
     }
 
 #undef CASE
@@ -409,12 +496,12 @@ public:
             CASE(15);
             CASE(16);
         default:
-            assert(false);
+            abort();
         }
 
 #undef CASE
 
-        assert(false);
+        abort();
         return NOP;
     }
 
@@ -431,6 +518,70 @@ bool ChewingLargeTable2::mask_out(phrase_token_t mask,
 
     m_db->synchronize();
     return true;
+}
+
+/* search_suggesion method */
+int ChewingLargeTable2::search_suggestion
+(int prefix_len,
+ /* in */ const ChewingKey prefix_keys[],
+ /* out */ PhraseTokens tokens) const {
+    ChewingKey index[MAX_PHRASE_LENGTH];
+    int result = SEARCH_NONE;
+
+    if (NULL == m_db)
+        return result;
+
+    if (contains_incomplete_pinyin(prefix_keys, prefix_len))
+        compute_incomplete_chewing_index(prefix_keys, index, prefix_len);
+    else
+        compute_chewing_index(prefix_keys, index, prefix_len);
+
+    const char * akbuf = (char *) index;
+    const size_t aksiz = prefix_len * sizeof(ChewingKey);
+    const int32_t vsiz = m_db->check(akbuf, aksiz);
+    /* -1 on failure. */
+    if (-1 == vsiz)
+        return result;
+
+    BasicDB::Cursor * cursor = m_db->cursor();
+    bool retval = cursor->jump(akbuf, aksiz);
+    if (!retval) {
+        delete cursor;
+        return result;
+    }
+
+    /* Get the next entry */
+    retval = cursor->step();
+    if (!retval) {
+        delete cursor;
+        return result;
+    }
+
+    size_t bksiz = 0;
+    const char * bkbuf = cursor->get_key(&bksiz);
+    MemoryChunk chunk;
+    while(kyotodb_chewing_continue_search(akbuf, aksiz, bkbuf, bksiz)) {
+        int phrase_length = bksiz / sizeof(ChewingKey);
+        size_t bvsiz = 0;
+        char * bvbuf = cursor->get_value(&bvsiz);
+        chunk.set_chunk(bvbuf, bvsiz, NULL);
+        result = search_suggestion_internal
+            (phrase_length, chunk, prefix_len, prefix_keys, tokens) | result;
+        chunk.set_size(0);
+        delete [] bvbuf;
+
+        retval = cursor->step();
+        if (!retval) {
+            delete cursor;
+            return result;
+        }
+
+        bksiz = 0;
+        bkbuf = cursor->get_key(&bksiz);
+    }
+
+    delete cursor;
+    return result;
 }
 
 };

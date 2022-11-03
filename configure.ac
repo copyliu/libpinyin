@@ -5,12 +5,12 @@
 # if not 1, append datestamp to the version number.
 m4_define([libpinyin_released], [1])
 m4_define([libpinyin_major_version], [2])
-m4_define([libpinyin_minor_version], [6])
-m4_define([libpinyin_micro_version], [1])
+m4_define([libpinyin_minor_version], [7])
+m4_define([libpinyin_micro_version], [92])
 m4_define(libpinyin_maybe_datestamp,
     m4_esyscmd([if test x]libpinyin_released[ != x1; then date +.%Y%m%d | tr -d '\n\r'; fi]))
 
-m4_define([libpinyin_abi_current], [13])
+m4_define([libpinyin_abi_current], [15])
 m4_define([libpinyin_abi_revision], [0])
 
 m4_define([libpinyin_version],

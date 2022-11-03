@@ -24,6 +24,44 @@
 
 namespace pinyin{
 
+/* keep the following function synced between dbm implementations
+   for consistent phrase key compare. */
+
+inline int compare_phrase(ucs4_t * lhs, ucs4_t * rhs, int phrase_length) {
+    int result;
+    for (int i = 0; i < phrase_length; ++i) {
+        result = lhs[i] - rhs[i];
+        if (0 != result)
+            return result;
+    }
+
+    return 0;
+}
+
+/* keep dbm key compare function inside the corresponding dbm file
+   to get more flexibility. */
+
+static bool bdb_phrase_continue_search(const DBT *dbt1,
+                                       const DBT *dbt2) {
+    ucs4_t * lhs_phrase = (ucs4_t *) dbt1->data;
+    int lhs_phrase_length = dbt1->size / sizeof(ucs4_t);
+    ucs4_t * rhs_phrase = (ucs4_t *) dbt2->data;
+    int rhs_phrase_length = dbt2->size / sizeof(ucs4_t);
+
+    /* The key in dbm is longer than the key in application. */
+    if (lhs_phrase_length >= rhs_phrase_length)
+        return false;
+
+    int min_phrase_length = lhs_phrase_length;
+
+    int result = compare_phrase (lhs_phrase, rhs_phrase, min_phrase_length);
+    if (0 != result)
+        return false;
+
+    /* continue the longer phrase search. */
+    return true;
+}
+
 PhraseLargeTable3::PhraseLargeTable3() {
     /* create in-memory db. */
     m_db = NULL;
@@ -166,6 +204,64 @@ int PhraseLargeTable3::search(int phrase_length,
 
     result = m_entry->search(tokens) | result;
 
+    return result;
+}
+
+int PhraseLargeTable3::search_suggestion(int phrase_length,
+                                         /* in */ const ucs4_t phrase[],
+                                         /* out */ PhraseTokens tokens) const {
+    int result = SEARCH_NONE;
+
+    if (NULL == m_db)
+        return result;
+    assert(NULL != m_entry);
+
+    DBC * cursorp = NULL;
+    /* Get a cursor */
+    int ret = m_db->cursor(m_db, NULL, &cursorp, 0);
+    if (ret != 0)
+        return result;
+
+    DBT db_key1;
+    memset(&db_key1, 0, sizeof(DBT));
+    db_key1.data = (void *) phrase;
+    db_key1.size = phrase_length * sizeof(ucs4_t);
+
+    DBT db_data;
+    memset(&db_data, 0, sizeof(DBT));
+    /* Get the prefix entry */
+    ret = cursorp->c_get(cursorp, &db_key1, &db_data, DB_SET);
+    if (ret != 0) {
+        cursorp->c_close(cursorp);
+        return result;
+    }
+
+    /* Get the next entry */
+    DBT db_key2;
+    memset(&db_key2, 0, sizeof(DBT));
+    memset(&db_data, 0, sizeof(DBT));
+    ret = cursorp->c_get(cursorp, &db_key2, &db_data, DB_NEXT);
+    if (ret != 0) {
+        cursorp->c_close(cursorp);
+        return result;
+    }
+
+    while(bdb_phrase_continue_search(&db_key1, &db_key2)) {
+
+        m_entry->m_chunk.set_chunk(db_data.data, db_data.size, NULL);
+        result = m_entry->search(tokens) | result;
+        m_entry->m_chunk.set_size(0);
+
+        memset(&db_key2, 0, sizeof(DBT));
+        memset(&db_data, 0, sizeof(DBT));
+        ret = cursorp->c_get(cursorp, &db_key2, &db_data, DB_NEXT);
+        if (ret != 0) {
+            cursorp->c_close(cursorp);
+            return result;
+        }
+    }
+
+    cursorp->c_close(cursorp);
     return result;
 }
 
